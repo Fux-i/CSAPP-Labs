@@ -33,6 +33,15 @@
 /* Returns true if p is ALIGNMENT-byte aligned */
 #define IS_ALIGNED(p)  ((((unsigned int)(p)) % ALIGNMENT) == 0)
 
+/*
+ * Name of the allocator under test, printed in the results banner.  The
+ * Makefile recompiles this file with -DMM_NAME=... so that each driver
+ * names the allocator it was linked against.
+ */
+#ifndef MM_NAME
+#define MM_NAME "mm malloc"
+#endif
+
 /****************************** 
  * The key compound data types 
  *****************************/
@@ -126,7 +135,7 @@ static double eval_mm_util(trace_t *trace, int tracenum, range_t **ranges);
 static void eval_mm_speed(void *ptr);
 
 /* Various helper routines */
-static void printresults(int n, stats_t *stats);
+static void printresults(int n, stats_t *stats, char **tracefiles);
 static void usage(void);
 static void unix_error(char *msg);
 static void malloc_error(int tracenum, int opnum, char *msg);
@@ -147,7 +156,6 @@ int main(int argc, char **argv)
     stats_t *mm_stats = NULL;  /* mm (i.e. student) stats for each trace */
     speed_t speed_params;      /* input parameters to the xx_speed routines */ 
 
-    int team_check = 1;  /* If set, check team structure (reset by -a) */
     int run_libc = 0;    /* If set, run libc malloc (set by -l) */
     int autograder = 0;  /* If set, emit summary info for autograder (-g) */
 
@@ -158,7 +166,7 @@ int main(int argc, char **argv)
     /* 
      * Read and interpret the command line arguments 
      */
-    while ((c = getopt(argc, argv, "f:t:hvVgal")) != EOF) {
+    while ((c = getopt(argc, argv, "f:t:hvVgl")) != EOF) {
         switch (c) {
 	case 'g': /* Generate summary info for the autograder */
 	    autograder = 1;
@@ -178,9 +186,6 @@ int main(int argc, char **argv)
 	    if (tracedir[strlen(tracedir)-1] != '/') 
 		strcat(tracedir, "/"); /* path always ends with "/" */
 	    break;
-        case 'a': /* Don't check team structure */
-            team_check = 0;
-            break;
         case 'l': /* Run libc malloc */
             run_libc = 1;
             break;
@@ -197,32 +202,6 @@ int main(int argc, char **argv)
 	    usage();
             exit(1);
         }
-    }
-	
-    /* 
-     * Check and print team info 
-     */
-    if (team_check) {
-	/* Students must fill in their team information */
-	if (!strcmp(team.teamname, "")) {
-	    printf("ERROR: Please provide the information about your team in mm.c.\n");
-	    exit(1);
-	} else
-	    printf("Team Name:%s\n", team.teamname);
-	if ((*team.name1 == '\0') || (*team.id1 == '\0')) {
-	    printf("ERROR.  You must fill in all team member 1 fields!\n");
-	    exit(1);
-	} 
-	else
-	    printf("Member 1 :%s:%s\n", team.name1, team.id1);
-
-	if (((*team.name2 != '\0') && (*team.id2 == '\0')) ||
-	    ((*team.name2 == '\0') && (*team.id2 != '\0'))) { 
-	    printf("ERROR.  You must fill in all or none of the team member 2 ID fields!\n");
-	    exit(1);
-	}
-	else if (*team.name2 != '\0')
-	    printf("Member 2 :%s:%s\n", team.name2, team.id2);
     }
 
     /* 
@@ -269,7 +248,7 @@ int main(int argc, char **argv)
 	/* Display the libc results in a compact table */
 	if (verbose) {
 	    printf("\nResults for libc malloc:\n");
-	    printresults(num_tracefiles, libc_stats);
+	    printresults(num_tracefiles, libc_stats, tracefiles);
 	}
     }
 
@@ -309,8 +288,8 @@ int main(int argc, char **argv)
 
     /* Display the mm results in a compact table */
     if (verbose) {
-	printf("\nResults for mm malloc:\n");
-	printresults(num_tracefiles, mm_stats);
+	printf("\nResults for %s:\n", MM_NAME);
+	printresults(num_tracefiles, mm_stats, tracefiles);
 	printf("\n");
     }
 
@@ -918,7 +897,7 @@ static void eval_libc_speed(void *ptr)
 /*
  * printresults - prints a performance summary for some malloc package
  */
-static void printresults(int n, stats_t *stats) 
+static void printresults(int n, stats_t *stats, char **tracefiles) 
 {
     int i;
     double secs = 0;
@@ -926,44 +905,43 @@ static void printresults(int n, stats_t *stats)
     double util = 0;
 
     /* Print the individual results for each trace */
-    printf("%5s%7s %5s%8s%10s%6s\n", 
-	   "trace", " valid", "util", "ops", "secs", "Kops");
+    printf("%6s%6s%8s%9s%8s  %s\n", "valid", "util", "ops", "secs", "Kops", "trace");
     for (i=0; i < n; i++) {
 	if (stats[i].valid) {
-	    printf("%2d%10s%5.0f%%%8.0f%10.6f%6.0f\n", 
-		   i,
+	    printf("%6s%5.0f%%%8.0f%9.6f%8.0f  %s\n", 
 		   "yes",
 		   stats[i].util*100.0,
 		   stats[i].ops,
 		   stats[i].secs,
-		   (stats[i].ops/1e3)/stats[i].secs);
+		   (stats[i].ops/1e3)/stats[i].secs,
+		   tracefiles[i]);
 	    secs += stats[i].secs;
 	    ops += stats[i].ops;
 	    util += stats[i].util;
 	}
 	else {
-	    printf("%2d%10s%6s%8s%10s%6s\n", 
-		   i,
+	    printf("%6s%6s%8s%9s%8s  %s\n", 
 		   "no",
 		   "-",
 		   "-",
 		   "-",
-		   "-");
+		   "-",
+		   tracefiles[i]);
 	}
     }
 
     /* Print the aggregate results for the set of traces */
     if (errors == 0) {
-	printf("%12s%5.0f%%%8.0f%10.6f%6.0f\n", 
-	       "Total       ",
+	printf("%6s%5.0f%%%8.0f%9.6f%8.0f\n", 
+	       "Total",
 	       (util/n)*100.0,
 	       ops, 
 	       secs,
 	       (ops/1e3)/secs);
     }
     else {
-	printf("%12s%6s%8s%10s%6s\n", 
-	       "Total       ",
+	printf("%6s%6s%8s%9s%8s\n", 
+	       "Total",
 	       "-", 
 	       "-", 
 	       "-", 
@@ -1004,9 +982,8 @@ void malloc_error(int tracenum, int opnum, char *msg)
  */
 static void usage(void) 
 {
-    fprintf(stderr, "Usage: mdriver [-hvVal] [-f <file>] [-t <dir>]\n");
+    fprintf(stderr, "Usage: mdriver [-hvVl] [-f <file>] [-t <dir>]\n");
     fprintf(stderr, "Options\n");
-    fprintf(stderr, "\t-a         Don't check the team structure.\n");
     fprintf(stderr, "\t-f <file>  Use <file> as the trace file.\n");
     fprintf(stderr, "\t-g         Generate summary info for autograder.\n");
     fprintf(stderr, "\t-h         Print this message.\n");
